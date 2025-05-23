@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Platform, Dimensions } from 'react-native';
 import { Audio } from 'expo-av';
 import { MaterialIcons } from '@expo/vector-icons';
 import Animated, {
@@ -16,6 +16,8 @@ import { analyzeAudio } from '../services/audioAnalysis';
 import { analyzeMood } from '../services/openAI';
 
 const MAX_RECORDING_DURATION = 30; // seconds
+const { width } = Dimensions.get('window');
+const BUTTON_SIZE = width * 0.32;
 
 export default function RecordScreen() {
   const navigation = useNavigation();
@@ -26,6 +28,7 @@ export default function RecordScreen() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const timerRef = useRef(null);
   const waveformScale = useSharedValue(1);
+  const fade = useSharedValue(0);
 
   useEffect(() => {
     (async () => {
@@ -36,24 +39,18 @@ export default function RecordScreen() {
         Alert.alert('Error', 'Failed to request microphone permissions');
       }
     })();
-
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      if (recording) {
-        recording.stopAndUnloadAsync();
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (recording) recording.stopAndUnloadAsync();
     };
   }, []);
 
   useEffect(() => {
     if (isRecording) {
-      // Start waveform animation
       waveformScale.value = withRepeat(
         withSequence(
-          withTiming(1.2, { duration: 500, easing: Easing.inOut(Easing.ease) }),
-          withTiming(1, { duration: 500, easing: Easing.inOut(Easing.ease) })
+          withTiming(1.18, { duration: 600, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1, { duration: 600, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         true
@@ -63,11 +60,15 @@ export default function RecordScreen() {
     }
   }, [isRecording]);
 
-  const waveformStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ scale: waveformScale.value }],
-    };
-  });
+  useEffect(() => {
+    fade.value = withTiming(1, { duration: 900 });
+  }, []);
+
+  const waveformStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: waveformScale.value }],
+    opacity: fade.value,
+  }));
+  const fadeInStyle = useAnimatedStyle(() => ({ opacity: fade.value }));
 
   const startRecording = async () => {
     try {
@@ -75,20 +76,16 @@ export default function RecordScreen() {
         Alert.alert('Permission Required', 'Please grant microphone access to record audio');
         return;
       }
-
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
-
       const { recording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
       setRecording(recording);
       setIsRecording(true);
       setDuration(0);
-
-      // Start timer
       timerRef.current = setInterval(() => {
         setDuration((prev) => {
           if (prev >= MAX_RECORDING_DURATION) {
@@ -106,25 +103,20 @@ export default function RecordScreen() {
   const stopRecording = async () => {
     try {
       if (!recording) return;
-
       clearInterval(timerRef.current);
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
       setRecording(null);
       setIsRecording(false);
       setIsTranscribing(true);
-
-      // Get transcription and analysis
       const transcript = await transcribeAudio(uri);
       const stressScore = await analyzeAudio(uri);
       const moodAnalysis = await analyzeMood(transcript);
-      
-      // Navigate to ResultScreen with all data
-      navigation.navigate('Result', { 
+      navigation.navigate('Result', {
         audioUri: uri,
         transcript,
         stressScore,
-        moodAnalysis
+        moodAnalysis,
       });
     } catch (error) {
       Alert.alert('Error', 'Failed to process recording');
@@ -141,41 +133,45 @@ export default function RecordScreen() {
   if (hasPermission === null) {
     return (
       <View style={styles.container}>
-        <Text>Requesting microphone permission...</Text>
+        <Text style={styles.infoText}>Requesting microphone permission...</Text>
       </View>
     );
   }
-
   if (hasPermission === false) {
     return (
       <View style={styles.container}>
-        <Text>No access to microphone</Text>
+        <Text style={styles.infoText}>No access to microphone</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.timer}>{formatTime(duration)}</Text>
-      
+      <Animated.View style={[styles.timerContainer, fadeInStyle]}>
+        <Text style={styles.timer}>{formatTime(duration)}</Text>
+        {/* Progress ring */}
+        <View style={styles.progressRingBg}>
+          <View style={[styles.progressRing, { width: `${(duration / MAX_RECORDING_DURATION) * 100}%` }]} />
+        </View>
+      </Animated.View>
       <Animated.View style={[styles.waveform, waveformStyle]}>
         <View style={styles.waveformInner} />
       </Animated.View>
-
       {isTranscribing ? (
-        <View style={styles.transcribingContainer}>
-          <ActivityIndicator size="large" color="#4A148C" />
+        <Animated.View style={[styles.transcribingContainer, fadeInStyle]}>
+          <ActivityIndicator size="large" color="#6A1B9A" />
           <Text style={styles.transcribingText}>Processing your recording...</Text>
-        </View>
+        </Animated.View>
       ) : (
         <TouchableOpacity
           style={[styles.recordButton, isRecording && styles.recordingButton]}
           onPress={isRecording ? stopRecording : startRecording}
+          activeOpacity={0.8}
         >
           <MaterialIcons
             name={isRecording ? 'stop' : 'mic'}
-            size={40}
-            color="white"
+            size={44}
+            color="#fff"
           />
         </TouchableOpacity>
       )}
@@ -188,55 +184,86 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F8FAFC',
+  },
+  timerContainer: {
+    alignItems: 'center',
+    marginBottom: 30,
   },
   timer: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#4A148C',
-    marginBottom: 40,
+    fontSize: 44,
+    fontWeight: '700',
+    color: '#6A1B9A',
+    marginBottom: 8,
+    letterSpacing: 1.2,
+    fontFamily: Platform.OS === 'ios' ? 'Helvetica Neue' : 'Roboto',
   },
-  recordButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#4A148C',
+  progressRingBg: {
+    width: BUTTON_SIZE + 16,
+    height: 8,
+    backgroundColor: '#E1BEE7',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  progressRing: {
+    height: '100%',
+    backgroundColor: '#6A1B9A',
+    borderRadius: 4,
+  },
+  waveform: {
+    width: BUTTON_SIZE * 1.2,
+    height: BUTTON_SIZE * 0.3,
+    borderRadius: BUTTON_SIZE * 0.15,
+    backgroundColor: '#E1BEE7',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    marginBottom: 40,
+    shadowColor: '#6A1B9A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  waveformInner: {
+    width: '80%',
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#6A1B9A',
+    opacity: 0.7,
+  },
+  recordButton: {
+    width: BUTTON_SIZE,
+    height: BUTTON_SIZE,
+    borderRadius: BUTTON_SIZE / 2,
+    backgroundColor: '#6A1B9A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#6A1B9A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
   },
   recordingButton: {
     backgroundColor: '#D32F2F',
   },
-  waveform: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(74, 20, 140, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  waveformInner: {
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: 'rgba(74, 20, 140, 0.2)',
-  },
   transcribingContainer: {
     alignItems: 'center',
-    justifyContent: 'center',
+    marginTop: 30,
   },
   transcribingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#4A148C',
+    fontSize: 18,
+    color: '#6A1B9A',
+    marginTop: 16,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+  },
+  infoText: {
+    fontSize: 18,
+    color: '#6A1B9A',
+    textAlign: 'center',
+    marginTop: 40,
+    fontWeight: '500',
   },
 }); 
