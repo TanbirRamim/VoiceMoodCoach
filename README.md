@@ -1,4 +1,4 @@
-# VoiceMood Coach 🎤 😊
+# VoiceMood Coach, check your stress level using our tool :') 
 
 A voice-based mood analysis and coaching app built with Expo and React Native.
 
